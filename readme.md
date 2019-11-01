@@ -1,5 +1,5 @@
 # Anomaly detection on NYC taxi dataset
-This dataset is downloaded from Kaggle. Read the readme Document for IMS Bearing Data for further information on the experiment and available data.
+This dataset is downloaded from Kaggle.
 
 ## Objective
 To find the anomaly in taxi data for certain events
