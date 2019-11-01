@@ -1,10 +1,8 @@
-# Anomaly detection on NASA Bearing dataset
-This dataset is downloaded from http://data-acoustics.com/measurements/bearing-faults/bearing-4/. Read the readme Document for IMS Bearing Data for further information on the experiment and available data.
-
-Dataset consists of four bearing data merged into single merged dataset file. All four bearing are tested to run to failure and during test bearing 2 failed.
+# Anomaly detection on NYC taxi dataset
+This dataset is downloaded from Kaggle. Read the readme Document for IMS Bearing Data for further information on the experiment and available data.
 
 ## Objective
-To classify data into normal and abnormal data. 
+To find the anomaly in taxi data for certain events
 
 ## Prerequisites
 Install following packages:
@@ -30,55 +28,67 @@ from matplotlib.dates import DateFormatter
 from sklearn.preprocessing import StandardScaler
 from sklearn import preprocessing
 from keras.layers import Dense, Input
-from keras.models import Model, Sequential, load_model
-from keras.models import model_from_json
-from sklearn.manifold import TSNE
+from keras.models import Model, load_model
+from keras import regularizers
 import seaborn as sns
+import scipy.io as spio
+import mplcursors
+plt.close('all')
+sns.set(style="whitegrid")
 np.random.seed(203)
 ```
 ### Step 2 : Data loading and dividing into training
-Data is loaded from the working directory and from 12<sup>th</sup> Feb 2004 11:02:39 to 14<sup>th</sup> Feb 2004 23:52:39 data is used for training the deep autoencoder model.
+Data is loaded from the working directory and from 01<sup>th</sup> Jul 2014 to 14<sup>th</sup> Jul 2014 23:52:39 data is used for training the deep autoencoder model.
 ```
-merged_data=pd.read_csv('merged_dataset_BearingTest_1.csv')
-merged_data.index=pd.to_datetime(merged_data[merged_data.columns[0]])
-merged_data=merged_data.drop(merged_data.columns[0],axis=1)
-data_train = merged_data['2004-02-12 11:02:39':'2004-02-14 23:52:39']
+data=pd.read_csv('nyc_taxi.csv')
+data.set_index("timestamp", inplace = True) 
+data.index = pd.to_datetime(data.index)
+data= data.sort_index()
+
+start='2014-07-01 00:00:00'
+end='2014-07-14 00:00:00'
+d=data[start:end]
+x_train,x_test=train_test_split(d,test_size=0.3,random_state=32)
+x_train=x_train['value'].values
+x_test=x_test['value'].values
 ```
 
 ### Step 3: Normalising data
 Standardise data using StandardScaler such that mean=0 and standard deviation is 1. Standardising data on training data.
 ```
-scaler = preprocessing.StandardScaler().fit(data_train)
-
-x_train= pd.DataFrame(scaler.fit(data_train),columns=data_train.columns, 
-                              index=data_train.index)
+scaler=preprocessing.StandardScaler()
+x_train =scaler.fit_transform(np.reshape(x_train,(len(x_train),1)))
+x_train_S1,x_test_S1=train_test_split(x_train,test_size=0.2)
+x_test=scaler.transform(np.reshape(x_test,(len(x_test),1)))
 ```
 ### Step4: Keras Deep Autoencoder model
 Keras model is built with two hidden layers with 50 and 10 neurons, encoding dimension is kept as two, which means bearing dataset is compressed into two columns.
 ```
 ncol = x_train.shape[1]
-first = 50
-second= 10
-encoding_dim = 2
+first = 100
+encoding_dim = 3
 
-input_dim = Input(shape = (ncol, ))
+input_dim = Input(shape = (x_train.shape[1], ))
 
-# Encoding layers=2
-encoded1 = Dense(first, activation = 'linear')(input_dim)
-encoded2 = Dense(second, activation = 'relu')(encoded1)
+# DEFINE THE ENCODER LAYERS
+encoded1 = Dense(first, activation = 'tanh')(input_dim)
 
-# Latent space=1
-encoded3 = Dense(encoding_dim, activation = 'relu')(encoded2)
+encoded2 = Dense(encoding_dim, activation = 'tanh')(encoded1)
 
-# Decoding layers=2
-decoded1 = Dense(second, activation = 'relu')(encoded3)
-decoded2 = Dense(first, activation = 'relu')(decoded1)
-decoded3 = Dense(ncol, activation = 'linear')(decoded2)
+# DEFINE THE DECODER LAYERS
+decoded1 = Dense(first, activation = 'tanh')(encoded2)
+decoded2 = Dense(ncol, activation = 'linear')(decoded1)
 
-model = Model(inputs = input_dim, outputs = decoded3)
-model.compile(optimizer = 'SGD', loss = 'mean_squared_error',metrics=['accuracy'])
-history = model.fit(x_train, x_train, epochs = 200, batch_size = 5, 
-                shuffle = True, validation_split=0.1)
+# COMBINE ENCODER AND DECODER INTO AN AUTOENCODER MODEL
+autoencoder = Model(inputs = input_dim, outputs = decoded2)
+
+# CONFIGURE AND TRAIN THE AUTOENCODER
+autoencoder.compile(optimizer = 'SGD', loss = 'mse')
+#autoencoder.compile(optimizer = 'adadelta', loss = 'mean_squared_error')
+
+AE = autoencoder.fit(x_train_S1, x_train_S1, epochs = 50, batch_size = 5, 
+                shuffle = True, validation_data = (x_test_S1, x_test_S1))
+
 ```
 ### Step5: Plotting performance of model
 #### Training loss and validation loss plot:
@@ -86,12 +96,16 @@ history = model.fit(x_train, x_train, epochs = 200, batch_size = 5,
 <p>
   
 ```python
-plt.plot(history.history['loss'],'b',label='Training loss')
-plt.plot(history.history['val_loss'],'r',label='Validation loss')
-plt.legend(loc='upper right')
-plt.xlabel('Epochs')
-plt.ylabel('Loss, [mse]')
-plt.show()
+training_loss = AE.history['loss']
+test_loss = AE.history['val_loss']
+
+plt.figure()
+plt.plot(training_loss, 'r--')
+plt.plot(test_loss, 'b-')
+plt.legend(['Training Loss', 'Test Loss'])
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('encoding_dim=' + str(encoding_dim))
 ```
 </p>
 </details>
@@ -99,21 +113,45 @@ plt.show()
 <img src="https://github.com/intellipredikt/Anomaly-Detection/blob/master/IMS%20Bearing/Image/Loss.png" width="600" height="400">
 </p>
 
-#### Proabability density plot for training data:
+#### REconstruction plot:
 <details><summary>Code</summary>
 <p>
 
 ```python
-x_train_pred = model.predict(x_train)
-mse_x_train = np.mean(np.power(np.abs(x_train_pred-x_train), 2), axis=1)
-
+#%% Evaluate performance on validation set of normal dataset 
+autoencoder_plot(x_test,1,'Reconstructed data')
+# Evaluate performance on severly faulty dataset
+dat=data.values
+x=preprocessing.StandardScaler().fit_transform(np.reshape(dat,(len(dat),1)))
+pred=autoencoder.predict(x)
 plt.figure()
-sns.distplot(mse_x_train,kde=True,color='green')
-plt.xlabel('mean squared error',fontsize=14,fontweight='bold')
-plt.ylabel('density',fontsize=14,fontweight='bold')
-plt.legend(['train'])
-plt.title('Density Function',fontsize=16,fontweight='bold')
-Threshold=np.round(3*np.std(mse_x_train),3) # 3 times standard deviation
+ax1=plt.subplot(2,1,1)
+plt.plot(data.index,x)
+plt.plot(data.index,pred)
+plt.title('Autoencoder Output',fontsize=12,fontweight='bold')
+plt.legend(['Normal data','Reconstructed data'])
+plt.xticks(rotation=0, ha='right')
+date_form = DateFormatter("%d/%b/%y") # date and year
+ax1.xaxis.set_major_formatter(date_form) 
+ax2=plt.subplot(2,1,2,sharex=ax1)
+error=np.abs(pred-x)
+plt.plot(data.index,error,'k')
+plt.xticks(rotation=0, ha='right')
+date_form = DateFormatter("%d/%b/%y") # date and year
+ax2.xaxis.set_major_formatter(date_form) 
+plt.title('Reconstruction error',fontsize=12,fontweight='bold')
+
+# isolation forest anomaly detection with contamination as 3% 
+from sklearn.ensemble import IsolationForest
+clf=IsolationForest(n_estimators=100,contamination=0.003)
+a_train,a_test=train_test_split(error,test_size=0.3)
+d=clf.fit(a_train)
+ano=d.predict(error)
+iso_ano_1=data[ano==-1]
+iso_ano=error[ano==-1]
+plt.scatter(iso_ano_1.index,iso_ano,marker='o',color='red')
+plt.legend(['reconst error','Anomaly'])
+mplcursors.cursor()
 ``` 
 </p>
 </details>
@@ -122,6 +160,7 @@ Threshold=np.round(3*np.std(mse_x_train),3) # 3 times standard deviation
 </p>
 
 From the above proablilty distribuition plot thereshold is set to 3 times of standard deviation as shown in text box. This threshold willbe used to flag anomaly in the merged bearing dataset. 
+
 <details><summary>Code</summary>
 <p>
 
