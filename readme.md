@@ -14,7 +14,7 @@ pip install keras
 pip install seaborn
 ```
 ## Python Algorithm
-This algorithm is written in python language. Keras deep learning autoencoder model is explained step by step.
+This algorithm is written in python language. Keras deep learning autoencoder model is used to detect anomaly.
 
 ### Step 1: Importing Library
 Importing libraries and setting random seed from numpy library
